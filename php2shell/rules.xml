@@ -1,0 +1,96 @@
+<!-- php2shell-rules -->
+<!-- PHP2Shell: CVE-2026-109618 and CVE-2026-109619, two remote code execution bugs in PHP patched in October 2026
+     (memory corruption on out-of-memory, and a use-after-free caused by stale state). Public write-ups disagree on the exact
+     mechanism behind each identifier - see the PHP security advisories. Requests reach the bugs through the multipart /
+     session upload progress handling, BEFORE application code runs. Fix: update PHP to a patched release. Appended to /var/ossec/etc/rules/local_rules.xml
+     by deploy.sh (marker php2shell-rules). The rules detect ATTEMPTS, not a confirmed compromise - after an alert check the host
+     (new .php files, php-fpm child processes, outgoing connections, cron, authorized_keys). Rollback: remove the block and restart the manager. -->
+<!-- php-fpm log (decoder php-fpm) - base rules. NOTE: they must come BEFORE the php2shell rules (if_sid requires an earlier definition) -->
+<group name="local,php-fpm,">
+  <rule id="100130" level="0">
+    <decoded_as>php-fpm</decoded_as>
+    <description>php-fpm: messages grouped</description>
+  </rule>
+  <rule id="100131" level="3">
+    <if_sid>100130</if_sid>
+    <match>PHP message: PHP Warning: |PHP message: PHP Fatal error: |PHP message: PHP Parse error:</match>
+    <description>php-fpm: PHP error - $(extra_data)</description>
+  </rule>
+  <rule id="100132" level="5">
+    <if_sid>100130</if_sid>
+    <match>server reached pm.max_children|seems busy</match>
+    <description>php-fpm: pool exhausted (pm.max_children) - $(extra_data)</description>
+  </rule>
+</group>
+
+<group name="local,web,attack,php2shell,">
+
+  <!-- Access log (nginx; NPM - decoder npm-accesslog): tool name or the upload_progress field in the URL or User-Agent
+       (PoCs: php2shell, PHP_SESSION_UPLOAD_PROGRESS - normally only in the POST body, scanners put them in the query). -->
+  <!-- Also a child of 31108 ("Ignored URLs (simple queries)", level 0): among siblings Wazuh checks level-0 rules first,
+       so a GET / with the tool in the User-Agent would end at 31108 and never reach this rule. -->
+  <rule id="100120" level="10">
+    <if_sid>31100, 31108</if_sid>
+    <match type="pcre2">(?i)php2shell|PHP_SESSION_UPLOAD_PROGRESS</match>
+    <description>PHP2Shell (CVE-2026-109618/109619): tool indicator in an HTTP request from $(srcip) (php2shell / PHP_SESSION_UPLOAD_PROGRESS in URL or User-Agent)</description>
+    <mitre><id>T1190</id></mitre>
+  </rule>
+
+  <!-- Series: >= 5 POSTs to a .php script ending in 5xx from one IP in 10 min - PoC stages (OOM -> 500, process crash -> 502).
+       Wazuh picks the FIRST matching rule in load order (built-in before local), so as a sibling of the built-in
+       31120-31123 (5xx codes) this rule never won and the 100122 series did not work - that is why it is a child of each of them. -->
+  <rule id="100121" level="6">
+    <if_sid>31120, 31121, 31122, 31123</if_sid>
+    <protocol>^POST$</protocol>
+    <!-- URL of a .php script (nginx combined: "POST /x.php?... HTTP/..."; NPM: - POST https host "/x.php?..."). The type="pcre2" attribute in <url> does not work
+         (the pattern was read as OS_Regex and never matched), so the match is done on the full line. -->
+    <match type="pcre2">(?:"POST \S*\.php(?:[?/]\S*)? HTTP/|- POST \w+ \S+ "[^"]*\.php(?:[?/][^"]*)?")</match>
+    <description>POST to a PHP script ended with error $(id)</description>
+  </rule>
+  <rule id="100122" level="10" frequency="5" timeframe="600">
+    <if_matched_sid>100121</if_matched_sid>
+    <same_source_ip />
+    <description>PHP2Shell (CVE-2026-109618/109619): series of >= 5 POSTs to .php with a 5xx error from $(srcip) in 10 min - possible exploitation attempt</description>
+    <mitre><id>T1190</id></mitre>
+  </rule>
+
+  <!-- nginx error log (31410/31420: "PHP message: PHP Warning/Fatal error" from FastCGI) and php-fpm log (100131):
+       out of memory BEFORE a script started ("in Unknown on line 0") = a bug in the multipart/upload_progress parser - the CVE-2026-109618 path.
+       An ordinary application OOM has a file name and line number, so it does not match here. -->
+  <rule id="100123" level="12">
+    <if_sid>31420, 100131</if_sid>
+    <regex type="pcre2">Allowed memory size of \d+ bytes exhausted.*in Unknown on line 0</regex>
+    <description>PHP2Shell (CVE-2026-109618): PHP ran out of memory before a script started (multipart/upload_progress parser) - client $(srcip)</description>
+    <mitre><id>T1190</id></mitre>
+  </rule>
+  <rule id="100125" level="13" frequency="3" timeframe="600">
+    <if_matched_sid>100123</if_matched_sid>
+    <description>PHP2Shell (CVE-2026-109618): 3 x out of memory before a script in 10 min - probably ongoing exploitation (the PoC repeats requests)</description>
+    <mitre><id>T1190</id></mitre>
+  </rule>
+
+  <!-- max_input_vars exceeded warning - the PoC sends 1001 fields (sets headers_sent). On its own it happens with large forms,
+       so informational only (level 7 - no e-mail). -->
+  <rule id="100124" level="7">
+    <if_sid>31410, 100131</if_sid>
+    <match>Input variables exceeded</match>
+    <description>PHP: max_input_vars exceeded (PHP2Shell PoC step: 1001 form fields) - client $(srcip)</description>
+  </rule>
+
+  <!-- A php-fpm worker died on a signal (FPM master log) - a symptom of use-after-free (CVE-2026-109619) or memory corruption -->
+  <rule id="100126" level="12">
+    <if_sid>100130</if_sid>
+    <regex type="pcre2">child \d+ exited on signal (?:11|7|6|4) \((?:SIGSEGV|SIGBUS|SIGABRT|SIGILL)\)</regex>
+    <description>php-fpm: worker process died on a signal ($(extra_data)) - symptom of use-after-free (PHP2Shell CVE-2026-109619) or a memory error</description>
+    <mitre><id>T1190</id></mitre>
+  </rule>
+
+  <!-- Kernel (host journald - LXC containers share the kernel; built-in 1010 "Process segfaulted"): segfault of a PHP process -->
+  <rule id="100127" level="12">
+    <if_sid>1010</if_sid>
+    <regex type="pcre2">\bphp(?:-fpm)?[\d.]*\[\d+\]: segfault at</regex>
+    <description>Kernel: segfault of a PHP process (php-fpm) - symptom of use-after-free (PHP2Shell CVE-2026-109619) or a memory error</description>
+    <mitre><id>T1190</id></mitre>
+  </rule>
+</group>
+<!-- /php2shell-rules -->

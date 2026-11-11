@@ -1,0 +1,49 @@
+<!-- attacks-decoders -->
+<!-- Decoders for: Vaultwarden (Docker json-file log), Stalwart (file log with ANSI colours), Home Assistant
+     (ha-security-log collector). Appended to /var/ossec/etc/decoders/local_decoder.xml by deploy.sh
+     (the block between the markers is replaced on every run). Rollback: remove the block and restart the manager. -->
+
+<!-- Vaultwarden: /var/lib/docker/containers/*/*-json.log read as text (the whole JSON line is in full_log):
+     {"log":"[2026-10-23 20:22:05.022][vaultwarden::api::identity][ERROR] Username or password is incorrect. Try again. IP: 198.51.100.23. Username: user@example.com.\n","stream":"stdout","time":"..."}
+     {"log":"[2026-10-23 20:24:28.043][vaultwarden::api::admin][ERROR] Invalid admin token. IP: 192.0.2.156\n","stream":"stdout","time":"..."} -->
+<!-- The line starts with `{"`, so the built-in `json` decoder (JSON_Decoder) grabs it first - a custom parent decoder with a prematch
+     would never run. That is why these are children of the `json` decoder (a regex over the whole line extracts IP and account);
+     the rules rely on decoded_as json + match. -->
+<!-- For the `json` parent only the FIRST matching child works - further children (admin, generic) were skipped, so there is a single
+     decoder with an alternation in a branch-reset group (?|...|...): shared fields extra_data, srcip, dstuser. -->
+<decoder name="vaultwarden-login">
+  <parent>json</parent>
+  <regex type="pcre2">\[vaultwarden::[\w:]+\]\[ERROR\] (?|(Username or password is incorrect)\. Try again\. IP: ([0-9a-fA-F:.]+)\. Username: (.+?)\.\\n"|(.+?)\.? IP: ([0-9a-fA-F:.]+)())</regex>
+  <order>extra_data, srcip, dstuser</order>
+</decoder>
+
+<!-- Stalwart: /var/log/stalwart/stalwart.<date>, INFO level, the file contains ANSI colours (\x1b[..m), also around field names:
+     ESC[37m2026-10-23T02:31:21ZESC[0m ESC[32;1mINFOESC[0m ESC[37;1mBanned due to scanESC[0m (security.scan-ban) ESC[36mlistenerIdESC[0m = "submissions", ESC[36mremoteIpESC[0m = 203.0.113.50, ... -->
+<decoder name="stalwart">
+  <prematch type="pcre2">^(?:\x1b\[[0-9;]*m)*\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ(?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*(?:TRACE|DEBUG|INFO|WARN|ERROR)</prematch>
+</decoder>
+
+<decoder name="stalwart-security">
+  <parent>stalwart</parent>
+  <regex type="pcre2">\((security\.[\w-]+)\).*?remoteIp(?:\x1b\[[0-9;]*m)* = ([0-9a-fA-F:.]+)</regex>
+  <order>id, srcip</order>
+</decoder>
+
+<!-- Home Assistant: the ha-security-log collector appends to /var/log/ha-security.log:
+     ha-security[ha-main]: 2026-10-23 20:28:59.905 WARNING (MainThread) [homeassistant.components.http.ban] Login attempt or request with invalid authentication from client-host (192.0.2.156). Requested URL: '/auth/login_flow/...'. (curl/8.7.1) -->
+<decoder name="ha-security">
+  <prematch type="pcre2">^ha-security\[[\w-]+\]: </prematch>
+</decoder>
+
+<decoder name="ha-security-login">
+  <parent>ha-security</parent>
+  <regex type="pcre2">^ha-security\[([\w-]+)\]: .*?invalid authentication from \S+ \(([0-9a-fA-F:.]+)\)\. Requested URL: '([^']*)'\. \((.*)\)$</regex>
+  <order>label, srcip, url, user_agent</order>
+</decoder>
+
+<decoder name="ha-security-other">
+  <parent>ha-security</parent>
+  <regex type="pcre2">^ha-security\[([\w-]+)\]: \S+ \S+ \w+ \(\S+\) \[(\S+)\] (.+)$</regex>
+  <order>label, logger, extra_data</order>
+</decoder>
+<!-- /attacks-decoders -->

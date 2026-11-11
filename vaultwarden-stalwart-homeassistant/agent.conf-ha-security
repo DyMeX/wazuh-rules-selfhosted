@@ -1,0 +1,8 @@
+<agent_config>
+  <!-- Group "ha-security" (agents on the hosts that run the ha-security-log collector): Home Assistant intrusion attempt log.
+       Decoder ha-security*, rules 100170-100174. File: /var/ossec/etc/shared/ha-security/agent.conf -->
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/ha-security.log</location>
+  </localfile>
+</agent_config>

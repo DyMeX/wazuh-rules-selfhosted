@@ -1,0 +1,58 @@
+#!/usr/bin/python3
+"""Home Assistant intrusion attempt collector for Wazuh. Run by a systemd timer every minute.
+
+Reads the HA Core log through `GET /api/hassio/core/logs` (long-lived admin token, file /etc/ha-security/<label>.env:
+URL=..., TOKEN=...), selects warnings from the http.ban / http.forwarded components (failed logins, bad token, untrusted proxy,
+bans) and appends them to /var/log/ha-security.log as `ha-security[<label>]: <HA line>` - that file is read by the Wazuh agent
+(group ha-security, decoder ha-security, rules 100170+). The first run only remembers the existing log (history is not replayed).
+Requires HA to log http.ban at WARNING level. State: /var/lib/ha-security/<label>.seen
+"""
+import glob, hashlib, json, os, re, sys, urllib.request
+
+CONF_DIR, OUTPUT, STATE_DIR = "/etc/ha-security", "/var/log/ha-security.log", "/var/lib/ha-security"
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+INTERESTING = re.compile(r"homeassistant\.components\.http\.(?:ban|forwarded)\]|invalid authentication|Login attempt|Banned IP|untrusted proxy", re.I)
+
+
+def load_env(path):
+    return dict(l.strip().split("=", 1) for l in open(path) if "=" in l and not l.startswith("#"))
+
+
+def process_one(path):
+    label = os.path.basename(path)[:-4]
+    cfg = load_env(path)
+    r = urllib.request.Request(cfg["URL"].rstrip("/") + "/api/hassio/core/logs", headers={"Authorization": "Bearer " + cfg["TOKEN"], "Range": "entries=:-500:"})
+    try:
+        with urllib.request.urlopen(r, timeout=30) as x:
+            lines = [ANSI.sub("", l).rstrip() for l in x.read().decode("utf-8", "replace").splitlines()]
+    except Exception as e:
+        print(f"{label}: HA unavailable - {e}", file=sys.stderr)
+        return
+    sp = f"{STATE_DIR}/{label}.seen"
+    try:
+        seen = json.load(open(sp))
+    except (OSError, ValueError):
+        seen = None   # first run
+    hashes = [hashlib.sha1(l.encode()).hexdigest()[:16] for l in lines]
+    if seen is not None:
+        known, new = set(seen), []
+        for l, h in zip(lines, hashes):
+            if h not in known and INTERESTING.search(l):
+                new.append(f"ha-security[{label}]: {l}\n")
+        if new:
+            with open(OUTPUT, "a") as f:
+                f.writelines(new)
+    os.makedirs(STATE_DIR, exist_ok=True)
+    json.dump(((seen or []) + hashes)[-4000:], open(sp, "w"))
+
+
+def main():
+    for path in sorted(glob.glob(CONF_DIR + "/*.env")):
+        try:
+            process_one(path)
+        except Exception as e:
+            print(f"{path}: {e}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

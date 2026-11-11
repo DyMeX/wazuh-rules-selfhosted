@@ -1,0 +1,12 @@
+<agent_config>
+  <!-- Group "php-fpm" (hosts running PHP-FPM, here a Zabbix frontend): PHP-FPM master log for Wazuh (worker process signals, PHP messages);
+       decoder php-fpm in local_decoder.xml, rules 100130+ and php2shell (100123/100126). File: /var/ossec/etc/shared/php-fpm/agent.conf -->
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/php*-fpm.log</location>
+  </localfile>
+  <!-- FIM of the Zabbix frontend - a new PHP file triggers rule 100183 (see ../vaultwarden-stalwart-homeassistant) -->
+  <syscheck>
+    <directories realtime="yes" check_all="yes" restrict="php$|phtml$|phar$">/usr/share/zabbix</directories>
+  </syscheck>
+</agent_config>

@@ -1,0 +1,13 @@
+<agent_config>
+  <!-- Group "npm" (hosts running Nginx Proxy Manager): NPM logs for Wazuh.
+       Access logs in the NPM "proxy"/"standard" format are decoded by npm-accesslog (local_decoder.xml) as web-log; error logs by the
+       built-in nginx-errorlog decoder. backend.log (NPM API) is intentionally left out. File: /var/ossec/etc/shared/npm/agent.conf -->
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/data/logs/*_access.log</location>
+  </localfile>
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/data/logs/*_error.log</location>
+  </localfile>
+</agent_config>

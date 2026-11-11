@@ -1,0 +1,8 @@
+  <!-- attacks-fim -->
+  <!-- Realtime FIM for ALL agents (group "default"): root SSH keys and user cron files.
+       Rules 100180 (level 12) and 100181 (level 10). The block between the markers is replaced by deploy.sh. -->
+  <syscheck>
+    <directories realtime="yes" check_all="yes" restrict="authorized_keys|id_">/root/.ssh</directories>
+    <directories realtime="yes" check_all="yes">/var/spool/cron</directories>
+  </syscheck>
+  <!-- /attacks-fim -->

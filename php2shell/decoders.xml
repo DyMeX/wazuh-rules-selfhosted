@@ -1,0 +1,49 @@
+<!-- php2shell-decoders -->
+<!-- PHP2Shell (CVE-2026-109618/109619) and nginx logs from all hosts. Appended to /var/ossec/etc/decoders/local_decoder.xml
+     by deploy.sh (marker: php2shell-decoders). Rollback: remove the block and restart the manager. -->
+
+<!-- Nginx Proxy Manager: /data/logs/*_access.log. NPM formats (not Apache combined, so the built-in web-accesslog decoder does not
+     understand them):
+     proxy:    [23/Oct/2026:07:43:40 +0200] - - 403 - GET https app.example.com "/%2F.github%2Fissue_template" [Client 203.0.113.38] [Length 111] [Gzip 1.35] [Sent-to 192.0.2.70] "curl/8.7.1" "-"
+     standard: [23/Oct/2026:07:43:40 +0200] 404 - GET http 192.0.2.88 "/" [Client 192.0.2.5] [Length 0] [Gzip -] "curl/8.7.1" "-"
+     Type web-log -> the built-in web rules (31100+: SQLi/XSS, 4xx/5xx, series) and the php2shell rules from local_rules.xml apply. -->
+<decoder name="npm-accesslog">
+  <type>web-log</type>
+  <prematch type="pcre2">^\[\d\d/\w{3}/\d{4}:\d\d:\d\d:\d\d [+-]\d{4}\] \S+ </prematch>
+</decoder>
+
+<decoder name="npm-accesslog-proxy">
+  <parent>npm-accesslog</parent>
+  <type>web-log</type>
+  <regex type="pcre2">^\[[^\]]+\] (\S+) (.+?) (\d{3}) - (\w+) (\w+) (\S+) "(.*?)" \[Client (\S+)\] \[Length (\S+)\] \[Gzip (\S+)\] \[Sent-to (\S*)\] "(.*?)" "(.*?)"$</regex>
+  <order>cache_status, upstream_status, id, protocol, scheme, http_host, url, srcip, bytes, gzip, upstream, user_agent, referer</order>
+</decoder>
+
+<decoder name="npm-accesslog-standard">
+  <parent>npm-accesslog</parent>
+  <type>web-log</type>
+  <regex type="pcre2">^\[[^\]]+\] (\d{3}) - (\w+) (\w+) (\S+) "(.*?)" \[Client (\S+)\] \[Length (\S+)\] \[Gzip (\S+)\] "(.*?)" "(.*?)"$</regex>
+  <order>id, protocol, scheme, http_host, url, srcip, bytes, gzip, user_agent, referer</order>
+</decoder>
+
+<!-- php-fpm (/var/log/php8.2-fpm.log) - FPM master log: worker process start/exit, signals (SIGSEGV),
+     PHP messages from workers ("PHP message: PHP Fatal error: ..."):
+     [23-Oct-2026 15:36:40] NOTICE: [pool zabbix] child 208866 started
+     [23-Oct-2026 15:36:40] WARNING: [pool zabbix] child 1234 exited on signal 11 (SIGSEGV) after 3.2 seconds from start
+     [23-Oct-2026 15:36:40] NOTICE: PHP message: PHP Fatal error:  Allowed memory size of 134217728 bytes exhausted (tried to allocate 12582920 bytes) in Unknown on line 0 -->
+<decoder name="php-fpm">
+  <prematch type="pcre2">^\[\d\d-\w{3}-\d{4} \d\d:\d\d:\d\d(?:\.\d+)?\] (?:NOTICE|WARNING|ERROR|ALERT|DEBUG): </prematch>
+</decoder>
+
+<decoder name="php-fpm-child">
+  <parent>php-fpm</parent>
+  <regex type="pcre2">^\[[^\]]+\] \w+: \[pool (\S+)\] child (\d+) (.+)$</regex>
+  <order>pool, pid, extra_data</order>
+</decoder>
+
+<decoder name="php-fpm-message">
+  <parent>php-fpm</parent>
+  <regex type="pcre2">^\[[^\]]+\] \w+: (?:\[pool (\S+)\] child (\d+) said into stderr: ")?PHP message: (.+?)"?$</regex>
+  <order>pool, pid, extra_data</order>
+</decoder>
+<!-- /php2shell-decoders -->

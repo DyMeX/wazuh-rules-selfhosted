@@ -1,0 +1,12 @@
+<agent_config>
+  <!-- Group "vaultwarden" (agent on the Vaultwarden host): container log (Docker json-file, no Vaultwarden restart needed)
+       + FIM of configuration and key. Decoder vaultwarden*, rules 100150-100155, 100184. File: /var/ossec/etc/shared/vaultwarden/agent.conf -->
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/lib/docker/containers/*/*-json.log</location>
+  </localfile>
+  <syscheck>
+    <directories realtime="yes" check_all="yes" restrict="config.json$|rsa_key">/opt/vaultwarden/data</directories>
+    <directories realtime="yes" check_all="yes" recursion_level="0" restrict="docker-compose.yml$">/opt/vaultwarden</directories>
+  </syscheck>
+</agent_config>
