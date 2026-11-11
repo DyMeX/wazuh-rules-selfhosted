@@ -1,0 +1,40 @@
+<!-- stalwart-rules -->
+<!-- Stalwart mail server detections (rules 100190-100194). Appended to /var/ossec/etc/rules/local_rules.xml by deploy.sh (the block
+     is replaced on every run). Levels: >= 12 -> e-mail alert (with the default Wazuh e-mail threshold settings you configure);
+     10 -> dashboard only. Rollback: remove the block and restart the manager.
+     Remember (see the top-level README, lessons): a parent rule must be defined before its child; among siblings, level-0 rules
+     are checked first, then rules from the highest level down. -->
+
+<!-- ===== Stalwart (/var/log/stalwart/stalwart.<date>, agent group `stalwart`) =====
+     The INFO log level does not record failed authentications (auth.failed is a debug-level event), but it does record bans
+     imposed by Stalwart's own mechanisms (scan, brute force, abuse) and blocked connections - the detection is based on those. -->
+<group name="local,stalwart,">
+  <rule id="100190" level="0">
+    <decoded_as>stalwart</decoded_as>
+    <description>Stalwart: log entries grouped</description>
+  </rule>
+  <rule id="100192" level="3">
+    <if_sid>100190</if_sid>
+    <match type="pcre2">\(security\.ip-blocked\)</match>
+    <description>Stalwart: blocked connection from $(srcip) (address already banned)</description>
+  </rule>
+  <rule id="100191" level="5">
+    <if_sid>100190</if_sid>
+    <match type="pcre2">\(security\.(?:scan|loiter)-ban\)</match>
+    <description>Stalwart: banned $(srcip) for scanning / loitering without commands (internet scanner)</description>
+    <mitre><id>T1595</id></mitre>
+  </rule>
+  <rule id="100193" level="10">
+    <if_sid>100190</if_sid>
+    <match type="pcre2">\(security\.(?:authentication|brute-force|abuse)-ban\)</match>
+    <description>Stalwart: banned $(srcip) for password guessing / mail abuse ($(id))</description>
+    <group>authentication_failures,</group>
+    <mitre><id>T1110</id></mitre>
+  </rule>
+  <rule id="100194" level="10" frequency="20" timeframe="3600">
+    <if_matched_sid>100191</if_matched_sid>
+    <description>Stalwart: >= 20 scan bans within an hour - coordinated scan of the mail server</description>
+    <mitre><id>T1595</id></mitre>
+  </rule>
+</group>
+<!-- /stalwart-rules -->

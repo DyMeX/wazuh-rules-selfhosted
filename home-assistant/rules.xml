@@ -1,0 +1,40 @@
+<!-- home-assistant-rules -->
+<!-- Home Assistant detections (rules 100170-100174). Appended to /var/ossec/etc/rules/local_rules.xml by deploy.sh (the block is
+     replaced on every run). Levels: >= 12 -> e-mail alert (with the default Wazuh e-mail threshold settings you configure);
+     10 -> dashboard only. Rollback: remove the block and restart the manager.
+     Remember (see the top-level README, lessons): a parent rule must be defined before its child; among siblings, level-0 rules
+     are checked first, then rules from the highest level down. -->
+
+<!-- ===== Home Assistant (one or more instances; ha-security-log collector, agent group `ha-security`) ===== -->
+<group name="local,homeassistant,authentication_failures,">
+  <rule id="100170" level="0">
+    <decoded_as>ha-security</decoded_as>
+    <description>Home Assistant: security entries grouped</description>
+  </rule>
+  <rule id="100171" level="5">
+    <if_sid>100170</if_sid>
+    <match>invalid authentication</match>
+    <description>Home Assistant ($(label)): failed login or wrong token from $(srcip) - $(url)</description>
+    <group>authentication_failed,</group>
+    <mitre><id>T1110</id></mitre>
+  </rule>
+  <rule id="100172" level="10" frequency="5" timeframe="600">
+    <if_matched_sid>100171</if_matched_sid>
+    <same_source_ip />
+    <description>Home Assistant ($(label)): >= 5 failed logins from $(srcip) in 10 min - possible brute force</description>
+    <group>authentication_failures,</group>
+    <mitre><id>T1110</id></mitre>
+  </rule>
+  <rule id="100173" level="8">
+    <if_sid>100170</if_sid>
+    <match type="pcre2">(?i)banned ip|ip.*banned</match>
+    <description>Home Assistant ($(label)): IP address banned after failed logins - $(extra_data)</description>
+    <group>authentication_failures,</group>
+  </rule>
+  <rule id="100174" level="5">
+    <if_sid>100170</if_sid>
+    <match>untrusted proxy</match>
+    <description>Home Assistant ($(label)): X-Forwarded-For header from an untrusted proxy - $(extra_data) (wrong trusted_proxies configuration or a bypass attempt)</description>
+  </rule>
+</group>
+<!-- /home-assistant-rules -->

@@ -1,6 +1,6 @@
 <agent_config>
   <!-- Group "stalwart" (agent on the mail server): Stalwart log (daily file, ANSI colours; decoder stalwart*, rules 100190-100194)
-       + FIM of web directories for PHP files (a server without PHP, rule 100182). File: /var/ossec/etc/shared/stalwart/agent.conf -->
+       + FIM of web directories for PHP files (a server without PHP; the alert rule 100182 is in ../fim). File: /var/ossec/etc/shared/stalwart/agent.conf -->
   <localfile>
     <log_format>syslog</log_format>
     <location>/var/log/stalwart/stalwart.%Y-%m-%d</location>

@@ -1,0 +1,49 @@
+<!-- vaultwarden-rules -->
+<!-- Vaultwarden detections (rules 100150-100155). Appended to /var/ossec/etc/rules/local_rules.xml by deploy.sh (the block is
+     replaced on every run). Levels: >= 12 -> e-mail alert (with the default Wazuh e-mail threshold settings you configure);
+     10 -> dashboard only. Rollback: remove the block and restart the manager.
+     Remember (see the top-level README, lessons): a parent rule must be defined before its child; among siblings, level-0 rules
+     are checked first, then rules from the highest level down. -->
+
+<!-- ===== Vaultwarden (container log, agent group `vaultwarden`) ===== -->
+<group name="local,vaultwarden,authentication_failures,">
+  <rule id="100150" level="0">
+    <decoded_as>json</decoded_as>
+    <match>[vaultwarden::</match>
+    <description>Vaultwarden: log entries grouped</description>
+  </rule>
+  <rule id="100151" level="5">
+    <if_sid>100150</if_sid>
+    <match>Username or password is incorrect</match>
+    <description>Vaultwarden: failed login of account $(dstuser) from $(srcip)</description>
+    <group>authentication_failed,</group>
+    <mitre><id>T1110</id></mitre>
+  </rule>
+  <rule id="100152" level="10" frequency="5" timeframe="600">
+    <if_matched_sid>100151</if_matched_sid>
+    <same_source_ip />
+    <description>Vaultwarden: >= 5 failed logins from $(srcip) in 10 min - possible brute force against the password vault</description>
+    <group>authentication_failures,</group>
+    <mitre><id>T1110</id></mitre>
+  </rule>
+  <rule id="100153" level="10">
+    <if_sid>100150</if_sid>
+    <match>Invalid admin token</match>
+    <description>Vaultwarden: wrong /admin panel token from $(srcip) (the admin panel should not be reachable from untrusted networks)</description>
+    <group>authentication_failed,</group>
+    <mitre><id>T1110</id></mitre>
+  </rule>
+  <rule id="100154" level="8">
+    <if_sid>100150</if_sid>
+    <match>vaultwarden::ratelimit</match>
+    <description>Vaultwarden: login rate limit exceeded (Too many login requests) - intensive login attempts</description>
+    <group>authentication_failures,</group>
+  </rule>
+  <rule id="100155" level="8">
+    <if_sid>100150</if_sid>
+    <match type="pcre2">(?i)totp|two.?factor|recovery code|2fa</match>
+    <description>Vaultwarden: failed second factor verification from $(srcip) - $(extra_data)</description>
+    <group>authentication_failed,</group>
+  </rule>
+</group>
+<!-- /vaultwarden-rules -->

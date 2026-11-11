@@ -1,12 +1,17 @@
 # wazuh-rules-selfhosted
 
-Custom Wazuh rules, decoders and agent group configuration for a small self-hosted setup. Three rulesets:
+Custom Wazuh rules, decoders and agent group configuration for a small self-hosted setup. Every directory is a separate ruleset with its own `deploy.sh`, so you can install only the services you run.
 
-- `vaultwarden-stalwart-homeassistant/` - failed logins and bans for Vaultwarden, the Stalwart mail server and Home Assistant, plus FIM (file integrity monitoring) rules for SSH keys, cron, PHP files in web directories and Vaultwarden configuration.
-- `php2shell/` - detections for PHP2Shell exploitation attempts (nginx and Nginx Proxy Manager access logs, nginx error log, php-fpm log, kernel segfaults) and decoders for the NPM access log and the php-fpm master log.
-- `general/` - quieter built-in rule 31151, 401 series, SSH logins from outside trusted networks (with a home address list that maintains itself), changes of listening ports on agents, night OOM noise and Zabbix dashboard noise.
+| Ruleset | Rule IDs | Covers |
+|---|---|---|
+| [`vaultwarden/`](vaultwarden/) | 100150-100155 | Failed logins, wrong admin token, rate limit and failed second factor in the Vaultwarden Docker log |
+| [`stalwart/`](stalwart/) | 100190-100194 | Bans and blocked connections in the Stalwart mail server log |
+| [`home-assistant/`](home-assistant/) | 100170-100174 | Failed logins, IP bans and untrusted proxy headers in Home Assistant (log collector included) |
+| [`fim/`](fim/) | 100180-100184 | File integrity monitoring: SSH keys, cron, PHP files in web directories, Zabbix frontend, Vaultwarden configuration |
+| [`php2shell/`](php2shell/) | 100120-100127, 100130-100132 | PHP2Shell exploitation attempts (nginx and Nginx Proxy Manager logs, php-fpm log, kernel segfaults) |
+| [`general/`](general/) | 100200-100230 | Quieter built-in rule 31151, 401 series, SSH logins from outside trusted networks, listening port changes, night OOM noise, Zabbix dashboard noise |
 
-Rule IDs are in the 100120-100230 range of `local_rules.xml` (plus an `overwrite` of the built-in 31151). Check for collisions with your own local rules before deploying.
+Rule IDs are in the 100120-100230 range of `local_rules.xml` (plus an `overwrite` of the built-in 31151). Check for collisions with your own local rules before deploying. The rulesets are independent: no ruleset needs another one to load, and the IDs do not overlap.
 
 ## Requirements
 
@@ -14,31 +19,29 @@ Rule IDs are in the 100120-100230 range of `local_rules.xml` (plus an `overwrite
 - `wazuh-logtest`, `wazuh-analysisd`, `verify-agent-conf` and `agent_groups` available on the manager (standard in `/var/ossec/bin`).
 - Root on the manager, `python3`, `systemd`.
 - `general/`: `curl` on the manager (used once to seed the home list), SSH access with a key to the hosts that get the ports command; optionally Tailscale on the manager. Rule 100230 is a child of built-in 31533, so Zabbix web access logs must be read by Wazuh.
-- Per component: Vaultwarden running in Docker (json-file log driver); Stalwart with file logging; Home Assistant with an admin long-lived access token; PHP-FPM; Nginx Proxy Manager or nginx.
+- Per component: see the README in each directory (Vaultwarden in Docker with the json-file log driver; Stalwart with file logging; Home Assistant with an admin long-lived access token; PHP-FPM; Nginx Proxy Manager or nginx).
 
 ## Layout
 
 ```
 LICENSE
 README.md
-vaultwarden-stalwart-homeassistant/
-  rules.xml                          rules 100150-100155, 100170-100174, 100180-100184, 100190-100194
-  decoders.xml                       decoders: vaultwarden-login, stalwart*, ha-security*
-  agent.conf-vaultwarden             group "vaultwarden": Docker log + FIM
-  agent.conf-stalwart                group "stalwart": Stalwart log + FIM of web directories
-  agent.conf-ha-security             group "ha-security": /var/log/ha-security.log
-  agent.conf-fim-default             FIM block for the "default" group (optional)
-  ha-security-log                    Home Assistant log collector (Python)
+vaultwarden/
+  rules.xml, decoders.xml, agent.conf-vaultwarden, deploy.sh, test.sh, README.md
+stalwart/
+  rules.xml, decoders.xml, agent.conf-stalwart, deploy.sh, test.sh, README.md
+home-assistant/
+  rules.xml, decoders.xml, agent.conf-ha-security, deploy.sh, test.sh, README.md
+  ha-security-log                    log collector (Python)
   install-ha-security-collector.sh   installs the collector, systemd timer, logrotate
-  deploy.sh                          manager-side deployment
-  test.sh                            wazuh-logtest cases
+fim/
+  rules.xml, agent.conf-fim-default, deploy.sh, test.sh, README.md
 php2shell/
   rules.xml                          rules 100120-100127, 100130-100132
   decoders.xml                       decoders: npm-accesslog*, php-fpm*
   agent.conf-npm                     group "npm": NPM access and error logs
   agent.conf-php-fpm                 group "php-fpm": php-fpm log + FIM of /usr/share/zabbix
-  deploy.sh                          manager-side deployment
-  test.sh                            wazuh-logtest cases
+  deploy.sh, test.sh
 general/
   rules.xml                          rules 100200-100201, 100210-100212, 100220-100221, 100225, 100230; overwrite of 31151
   decoders.xml                       decoder: ssh-home
@@ -46,39 +49,12 @@ general/
   custom-ssh-home, custom-ssh-home.py  integration that maintains the home address list
   ssh-home-list.path, .service       systemd units: restart the manager when the home list changes
   ports-agents.sh, ports-insert.sh   listening-ports command for the agents' local ossec.conf (run from a workstation)
-  deploy.sh                          manager-side deployment
-  test.sh                            wazuh-logtest cases
+  deploy.sh, test.sh
 ```
 
 ## What is detected
 
-### Vaultwarden / Stalwart / Home Assistant / FIM
-
-| Rule | Level | Triggers on |
-|---|---|---|
-| 100150 | 0 | Any Vaultwarden log line (`[vaultwarden::` in the Docker json-file log); parent of the rules below |
-| 100151 | 5 | Failed login ("Username or password is incorrect"); account and source IP in the description |
-| 100152 | 10 | 5 x rule 100151 from the same IP within 600 s |
-| 100153 | 10 | "Invalid admin token" (wrong `/admin` panel token) |
-| 100154 | 8 | `vaultwarden::ratelimit` (login rate limit exceeded) |
-| 100155 | 8 | Failed second factor (TOTP, two-factor, recovery code, 2FA in the line) |
-| 100190 | 0 | Any Stalwart log line; parent of the rules below |
-| 100192 | 3 | `security.ip-blocked` (connection from an already banned address) |
-| 100191 | 5 | `security.scan-ban` or `security.loiter-ban` (scanner banned by Stalwart) |
-| 100193 | 10 | `security.authentication-ban`, `security.brute-force-ban` or `security.abuse-ban` |
-| 100194 | 10 | 20 x rule 100191 within 3600 s |
-| 100170 | 0 | Any line of `/var/log/ha-security.log`; parent of the rules below |
-| 100171 | 5 | Home Assistant "invalid authentication" warning (failed login or wrong token) |
-| 100172 | 10 | 5 x rule 100171 from the same IP within 600 s |
-| 100173 | 8 | Home Assistant IP ban message ("Banned IP") |
-| 100174 | 5 | "untrusted proxy" (X-Forwarded-For from a proxy not in `trusted_proxies`) |
-| 100180 | 12 | FIM change (rules 550, 553, 554) of `/root/.ssh/authorized_keys` or `/root/.ssh/id_*` |
-| 100181 | 10 | FIM change of files under `/var/spool/cron/` |
-| 100182 | 12 | FIM change (rules 550, 554) of a `*php`, `*php<digit>`, `*phtml` or `*phar` file under `/srv` or `/var/www` (intended for servers that have no PHP at all) |
-| 100183 | 10 | FIM new file (rule 554) with a PHP extension under `/usr/share/zabbix/` |
-| 100184 | 10 | FIM change of `/opt/vaultwarden/data/config.json`, `rsa_key*` or `/opt/vaultwarden/docker-compose.yml` |
-
-Levels 10 are deliberate for the "series" rules: bots guess passwords constantly and an e-mail per series would flood the mailbox. In my setup level >= 12 sends e-mail (limited to 12 per hour) and level 10 stays on the dashboard only (Discover query `rule.id:1001*`); adjust to your own alerting thresholds.
+Vaultwarden, Stalwart, Home Assistant and FIM: rule tables are in the README of each directory. PHP2Shell and the general rules are described here.
 
 ### PHP2Shell and PHP logs
 
@@ -137,21 +113,37 @@ The public address of a residential line changes every few days, and a level 12 
 
 ## Deploy
 
-All `deploy.sh` scripts run on the Wazuh manager as root. Agent IDs are passed in environment variables as space-separated lists; an empty list creates the group without assigning agents. The `deploy.sh` scripts back up `local_rules.xml` and `local_decoder.xml` to `/root/pre-wazuh-rules-<date>/`, append the XML between marker comments (re-running replaces the block), run `wazuh-analysisd -t` (on failure the backups are restored), create the agent groups, restart the manager only if rules or decoders changed, and finish by running `test.sh`.
+Every ruleset has its own `deploy.sh`. They all run on the Wazuh manager as root and work the same way:
+
+1. Back up `local_rules.xml` and `local_decoder.xml` to `/root/pre-wazuh-rules-<date>/` (`general` uses file names starting with `general-`). An existing backup of the same day is not overwritten.
+2. Insert the ruleset's XML between marker comments, for example `<!-- vaultwarden-rules -->` ... `<!-- /vaultwarden-rules -->`. Each ruleset has its own markers (`<name>-rules` and `<name>-decoders`), so the blocks of different rulesets do not touch each other. Re-running replaces only the block of that ruleset, and nothing is written when the block is already identical.
+3. Run `wazuh-analysisd -t`. On failure the backups are restored and the script exits.
+4. Create the agent group (centralised `agent.conf`), verify it with `verify-agent-conf` and assign the agents.
+5. Restart the manager only if rules or decoders changed (or with `--restart`).
+6. Run the ruleset's `test.sh`.
+
+Agent IDs are passed in environment variables as space-separated lists; an empty list creates the group without assigning agents. To remove a ruleset, delete its two marker blocks (for `fim` also the `fim-default` block in the default group's `agent.conf`), remove the agent group with `agent_groups -r -g <group>` and restart the manager.
 
 ```
-# PHP2Shell + web logs
-cd php2shell
-NPM_AGENT_IDS="001 002" PHPFPM_AGENT_IDS="003" ./deploy.sh
+# Vaultwarden
+cd vaultwarden && VAULTWARDEN_AGENT_IDS="001" ./deploy.sh
 
-# Vaultwarden / Stalwart / Home Assistant / FIM
-cd vaultwarden-stalwart-homeassistant
-VAULTWARDEN_AGENT_IDS="001" STALWART_AGENT_IDS="002" HA_SECURITY_AGENT_IDS="003 004" PHPFPM_AGENT_IDS="005" ./deploy.sh
-./deploy.sh --fim-default     # optional: FIM for /root/.ssh and /var/spool/cron on all agents (group "default")
+# Stalwart
+cd stalwart && STALWART_AGENT_IDS="002" ./deploy.sh
+
+# Home Assistant: collector on a host that can reach HA, then the rules on the manager
+cd home-assistant
+printf 'URL=http://ha.example.lan:8123\nTOKEN=<long-lived access token>\n' | ./install-ha-security-collector.sh ha-main   # on the collector host
+HA_SECURITY_AGENT_IDS="003 004" ./deploy.sh                                                                            # on the manager
+
+# FIM
+cd fim && ./deploy.sh [--fim-default]   # --fim-default: FIM for /root/.ssh and /var/spool/cron on all agents (group "default")
+
+# PHP2Shell + web logs
+cd php2shell && NPM_AGENT_IDS="001 002" PHPFPM_AGENT_IDS="003" ./deploy.sh
 
 # General rules (on the manager; no agent IDs, the rules apply to all agents)
-cd general
-./deploy.sh [--restart]
+cd general && ./deploy.sh [--restart]
 
 # Listening ports (from a workstation with SSH keys to the targets, not on the manager)
 cd general
@@ -162,43 +154,42 @@ PUBLIC_HOSTS="root@203.0.113.10" HOSTS="root@192.0.2.80" PROXMOX_HOSTS="root@192
 
 `ports-agents.sh` takes its targets from environment variables: `PUBLIC_HOSTS` (alias `public-ports`, level 12), `HOSTS` (alias `listening-ports`, level 10), `PROXMOX_HOSTS` (the host and every running container with an agent, found with `pct list`), and `EXCLUDES` (one line per container: `<ssh destination>:<CTID> <grep -E pattern>`, listening addresses matching the pattern are dropped; in my setup a container where Xvfb opens and closes a TCP port by itself, and a container whose port on a VPN interface changes with the server). It is idempotent and keeps a copy `ossec.conf.pre-ports` on each target; if the agent does not start after the change, the copy is restored.
 
-`vaultwarden-stalwart-homeassistant/deploy.sh` also installs `../php2shell/agent.conf-php-fpm` into the `php-fpm` group, so keep both directories side by side.
-
 `php2shell/deploy.sh` also excludes the built-in Zeus Web Server decoder and rules in the manager's `ossec.conf` (`decoder_exclude` and `rule_exclude`). That decoder matches any line starting with `[dd/Mon/yyyy:...]`, which includes NPM access logs. Skip this if you actually use Zeus; the exclusion must cover both the decoder and its rules file, otherwise the manager does not start.
 
 nginx hosts that are not NPM: add a `<localfile>` for their access and error logs to the agent's local `ossec.conf`.
 
-### Home Assistant collector
+### Migrating from the old combined directory
 
-Home Assistant does not write the needed warnings by default. In my instances the `homeassistant` logger was at CRITICAL, so the "Login attempt or request with invalid authentication" warning (component `http.ban`) was never produced. Set the logger level for `homeassistant.components.http.ban` and `homeassistant.components.http.forwarded` to WARNING.
+Earlier versions had one directory `vaultwarden-stalwart-homeassistant/` that installed all four rulesets as the blocks `attacks-rules` and `attacks-decoders` (and `attacks-fim` in the default group). Those blocks define the same rule IDs as the new directories, so they must not coexist. The new `deploy.sh` scripts refuse to run while an old block is present. Migration:
 
-On a host that can reach Home Assistant (as root, with the config on stdin so the token is not in the process list):
+1. On the manager, back up `etc/rules/local_rules.xml`, `etc/decoders/local_decoder.xml` and `etc/shared/default/agent.conf`.
+2. Delete the blocks from `<!-- attacks-rules -->` to `<!-- /attacks-rules -->` and from `<!-- attacks-decoders -->` to `<!-- /attacks-decoders -->`.
+3. Run the `deploy.sh` of each service you use. `fim/deploy.sh --fim-default` removes the old `attacks-fim` block itself.
 
-```
-printf 'URL=http://ha.example.lan:8123\nTOKEN=<long-lived access token>\n' | ./install-ha-security-collector.sh ha-main
-```
-
-The argument is a label for the instance; it appears in alerts as `$(label)`. The token must belong to an admin user. The collector reads `GET /api/hassio/core/logs` every 60 s, keeps hashes of lines already seen in `/var/lib/ha-security/<label>.seen`, and appends matching lines to `/var/log/ha-security.log` (rotated weekly, 8 copies). The first run only records existing lines. One host can serve several instances: put one `<label>.env` file per instance in `/etc/ha-security/`. A wrong Bearer token on `/api/states` is not logged by Home Assistant (only login_flow and websocket failures are).
+The agent groups (`vaultwarden`, `stalwart`, `ha-security`) keep their names and assignments. The old `deploy.sh` also created the `php-fpm` group; that is now done only by `php2shell/deploy.sh` (`PHPFPM_AGENT_IDS`).
 
 ## Test
 
 On the manager:
 
 ```
-./php2shell/test.sh                              # 22 cases
-./vaultwarden-stalwart-homeassistant/test.sh     # 17 cases
-./general/test.sh                                # 18 cases (17 if the home address cannot be determined)
+./vaultwarden/test.sh       # 6 cases
+./stalwart/test.sh          # 6 cases
+./home-assistant/test.sh    # 5 cases
+./fim/test.sh               # presence check of the rule IDs, no logtest cases
+./php2shell/test.sh         # 22 cases
+./general/test.sh           # 18 cases (17 if the home address cannot be determined)
 ```
 
-Each case feeds one log line (or a series) through `wazuh-logtest -l <location>` and compares the last matched rule ID. Output is PASS/FAIL per case and the exit code is 1 on any failure. `general/test.sh` also runs a dry run of the integration three times (foreign address, non-public address, and a neighbour of the current home address); the last one is skipped when the home address cannot be determined. It needs `curl` and `su` to user `wazuh`. The night OOM case (100225) expects 5108 outside the 22:55-05:40 UTC window and 100225 inside it, so the expected ID depends on the time of day. Run `wazuh-logtest` manually with `-l <location>` to try your own lines. FIM rules cannot be tested this way (the `syscheck` location is treated like JSON); 100180 and 100182 were verified only for syntax by the author, 100181, 100183 and 100184 on a live agent. The ports rules are covered only up to rule 530 in logtest (the first output is remembered, the alert comes with the second, different output); The 100220/100221 alert itself is not covered by `test.sh`.
+Each case feeds one log line (or a series) through `wazuh-logtest -l <location>` and compares the last matched rule ID. Output is PASS/FAIL per case and the exit code is 1 on any failure. `general/test.sh` also runs a dry run of the integration three times (foreign address, non-public address, and a neighbour of the current home address); the last one is skipped when the home address cannot be determined. It needs `curl` and `su` to user `wazuh`. The night OOM case (100225) expects 5108 outside the 22:55-05:40 UTC window and 100225 inside it, so the expected ID depends on the time of day. Run `wazuh-logtest` manually with `-l <location>` to try your own lines. FIM rules cannot be tested this way (the `syscheck` location is treated like JSON); see `fim/README.md`. The ports rules are covered only up to rule 530 in logtest (the first output is remembered, the alert comes with the second, different output); the 100220/100221 alert itself is not covered by `test.sh`.
 
 ## Adapting
 
+Service-specific settings (log paths, FIM paths, group names) are in the README of each directory. Common to all rulesets:
+
 - Agent groups: group names (`vaultwarden`, `stalwart`, `ha-security`, `npm`, `php-fpm`) are only labels; the rules do not depend on them. Change the `agent.conf-*` files and the group names in `deploy.sh` together.
-- Log paths: Vaultwarden `/var/lib/docker/containers/*/*-json.log` (all containers on that agent are read; the rules only match `[vaultwarden::`), Stalwart `/var/log/stalwart/stalwart.%Y-%m-%d`, NPM `/data/logs/*_access.log` and `*_error.log`, php-fpm `/var/log/php*-fpm.log`. Edit `agent.conf-*` for other locations.
-- FIM paths in the rules (`/opt/vaultwarden/...`, `/usr/share/zabbix/`, `/srv`, `/var/www`) are hard-coded in both `rules.xml` and the matching `agent.conf-*` / `agent.conf-fim-default`; change them in both places.
-- Rule 100182 assumes the server has no PHP at all. Remove it or narrow the paths if it does.
-- Levels are set for my alerting; change `level=` as needed.
+- Levels are set for my alerting; change `level=` as needed. In my setup level >= 12 sends e-mail (limited to 12 per hour) and level 10 stays on the dashboard only (Discover query `rule.id:1001*`). Level 10 is deliberate for the "series" rules: bots guess passwords constantly and an e-mail per series would flood the mailbox.
+- Log paths of PHP2Shell: NPM `/data/logs/*_access.log` and `*_error.log`, php-fpm `/var/log/php*-fpm.log`. Edit `agent.conf-*` for other locations.
 - General rules: replace the example networks in `general/trusted-ssh` (LAN, home ISP range, VPN ranges) with yours; keep one `key:value` per line and no empty file. If you change them, change the addresses in `general/test.sh` as well (192.0.2.x = trusted LAN, 198.51.100.x = trusted home, 203.0.113.x = foreign).
 - 100230: set `<srcip>` in `general/rules.xml` to the host your Zabbix dashboard is viewed from, or remove the rule.
 - Night window of 100225: edit `<time>` (manager time).
@@ -206,6 +197,8 @@ Each case feeds one log line (or a series) through `wazuh-logtest -l <location>`
 - Rule IDs and the list/decoder names (`trusted-ssh`, `trusted-ssh-home`, `ssh-home`) are referenced in several files; rename them in all of `rules.xml`, `decoders.xml`, `deploy.sh`, `test.sh`, the integration and the unit files together.
 
 ## Known limitations
+
+Limitations of Vaultwarden, Stalwart, Home Assistant and FIM are in the README of each directory.
 
 - General rules: the trusted list entries in `trusted-ssh` are examples (documentation ranges). With the shipped list every address outside them triggers the integration on a successful SSH login, so edit the list before deploying.
 - The home address check trusts a whole /24. Anyone logging in from the same /24 as the current home address (for example another customer of the same mobile operator pool) is treated as home.
@@ -215,12 +208,7 @@ Each case feeds one log line (or a series) through `wazuh-logtest -l <location>`
 - 100210 reacts only to built-in rule 5715 (sshd successful authentication).
 - Ports: TCP only; loopback and the Tailscale interface are not listed; containers without an agent and the manager itself are not covered by `ports-agents.sh`.
 - 100225 uses the manager's clock; if your manager is not in UTC, change `<time>`.
-
-- Stalwart at INFO level does not log failed authentications (`auth.failed` is a debug-level event; raising the level produced a flood of logs on a 1 vCPU server), so Stalwart detection relies on ban events from Stalwart's own mechanisms.
-- Vaultwarden: the source IP in the log is the real client IP only if the proxy in front passes it on (mine passes the Cloudflare client IP header).
 - Rule 100121/100122 only see requests whose status is 5xx and whose method is POST to a URL containing `.php`.
-- The Home Assistant collector depends on the `/api/hassio/core/logs` endpoint; instances where that endpoint is not available are not covered.
-- A Python default User-Agent can be blocked by Cloudflare in front of Home Assistant (I got 403 from a Cloudflare-fronted instance); the collector does not set a custom one.
 - The php2shell rules detect attempts and indicators; they do not prove a compromise or its absence.
 
 ## Lessons from writing these rules

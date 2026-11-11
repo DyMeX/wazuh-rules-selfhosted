@@ -1,0 +1,44 @@
+<!-- fim-rules -->
+<!-- FIM (syscheck) detections (rules 100180-100184): SSH keys, cron, PHP files in web directories, Vaultwarden configuration.
+     Appended to /var/ossec/etc/rules/local_rules.xml by deploy.sh (the block is replaced on every run).
+     Levels: >= 12 -> e-mail alert (with the default Wazuh e-mail threshold settings you configure); 10 -> dashboard only.
+     The rules only match syscheck events; the agents must monitor the paths (see agent.conf-fim-default and the README).
+     Rollback: remove the block and restart the manager. -->
+
+<!-- ===== FIM (syscheck): changes that indicate a compromise, not an attempt ===== -->
+<group name="local,syscheck,fim_attacks,">
+  <!-- root SSH keys (authorized_keys, id_*) - when you add your own key yourself, the alert is expected -->
+  <rule id="100180" level="12">
+    <if_sid>550, 553, 554</if_sid>
+    <field name="file" type="pcre2">^/root/\.ssh/(?:authorized_keys|id_)</field>
+    <description>FIM: root SSH keys changed - $(file)</description>
+    <mitre><id>T1098.004</id></mitre>
+  </rule>
+  <rule id="100181" level="10">
+    <if_sid>550, 553, 554</if_sid>
+    <field name="file" type="pcre2">^/var/spool/cron/</field>
+    <description>FIM: user cron jobs changed - $(file)</description>
+    <mitre><id>T1053.003</id></mitre>
+  </rule>
+  <!-- A server without PHP: any .php/.phtml/.phar file in the web directories is a webshell -->
+  <rule id="100182" level="12">
+    <if_sid>550, 554</if_sid>
+    <field name="file" type="pcre2">^/(?:srv|var/www)/.*(?:php\d?|phtml|phar)$</field>
+    <description>FIM: PHP file in a web directory of a server without PHP (webshell?) - $(file)</description>
+    <mitre><id>T1505.003</id></mitre>
+  </rule>
+  <!-- Zabbix frontend: new PHP file (changes to existing files during a package upgrade are normal - they stay at level 7) -->
+  <rule id="100183" level="10">
+    <if_sid>554</if_sid>
+    <field name="file" type="pcre2">^/usr/share/zabbix/.*(?:php|phtml|phar)$</field>
+    <description>FIM: new PHP file in the Zabbix frontend (webshell or package upgrade) - $(file)</description>
+    <mitre><id>T1505.003</id></mitre>
+  </rule>
+  <!-- Vaultwarden configuration and key -->
+  <rule id="100184" level="10">
+    <if_sid>550, 553, 554</if_sid>
+    <field name="file" type="pcre2">^/opt/vaultwarden/(?:data/(?:config\.json|rsa_key)|docker-compose\.yml)</field>
+    <description>FIM: Vaultwarden configuration / key changed - $(file)</description>
+  </rule>
+</group>
+<!-- /fim-rules -->

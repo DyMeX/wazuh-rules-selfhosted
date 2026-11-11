@@ -1,0 +1,22 @@
+<!-- home-assistant-decoders -->
+<!-- Decoders for Home Assistant (ha-security-log collector). Appended to /var/ossec/etc/decoders/local_decoder.xml by deploy.sh
+     (the block between the markers is replaced on every run). Rollback: remove the block and restart the manager. -->
+
+<!-- Home Assistant: the ha-security-log collector appends to /var/log/ha-security.log:
+     ha-security[ha-main]: 2026-10-23 20:28:59.905 WARNING (MainThread) [homeassistant.components.http.ban] Login attempt or request with invalid authentication from client-host (192.0.2.156). Requested URL: '/auth/login_flow/...'. (curl/8.7.1) -->
+<decoder name="ha-security">
+  <prematch type="pcre2">^ha-security\[[\w-]+\]: </prematch>
+</decoder>
+
+<decoder name="ha-security-login">
+  <parent>ha-security</parent>
+  <regex type="pcre2">^ha-security\[([\w-]+)\]: .*?invalid authentication from \S+ \(([0-9a-fA-F:.]+)\)\. Requested URL: '([^']*)'\. \((.*)\)$</regex>
+  <order>label, srcip, url, user_agent</order>
+</decoder>
+
+<decoder name="ha-security-other">
+  <parent>ha-security</parent>
+  <regex type="pcre2">^ha-security\[([\w-]+)\]: \S+ \S+ \w+ \(\S+\) \[(\S+)\] (.+)$</regex>
+  <order>label, logger, extra_data</order>
+</decoder>
+<!-- /home-assistant-decoders -->

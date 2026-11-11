@@ -5,7 +5,7 @@
     <log_format>syslog</log_format>
     <location>/var/log/php*-fpm.log</location>
   </localfile>
-  <!-- FIM of the Zabbix frontend - a new PHP file triggers rule 100183 (see ../vaultwarden-stalwart-homeassistant) -->
+  <!-- FIM of the Zabbix frontend - a new PHP file triggers rule 100183 (see ../fim) -->
   <syscheck>
     <directories realtime="yes" check_all="yes" restrict="php$|phtml$|phar$">/usr/share/zabbix</directories>
   </syscheck>

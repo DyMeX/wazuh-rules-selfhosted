@@ -1,0 +1,18 @@
+<!-- vaultwarden-decoders -->
+<!-- Decoder for Vaultwarden (Docker json-file log). Appended to /var/ossec/etc/decoders/local_decoder.xml by deploy.sh
+     (the block between the markers is replaced on every run). Rollback: remove the block and restart the manager. -->
+
+<!-- Vaultwarden: /var/lib/docker/containers/*/*-json.log read as text (the whole JSON line is in full_log):
+     {"log":"[2026-10-23 20:22:05.022][vaultwarden::api::identity][ERROR] Username or password is incorrect. Try again. IP: 198.51.100.23. Username: user@example.com.\n","stream":"stdout","time":"..."}
+     {"log":"[2026-10-23 20:24:28.043][vaultwarden::api::admin][ERROR] Invalid admin token. IP: 192.0.2.156\n","stream":"stdout","time":"..."} -->
+<!-- The line starts with `{"`, so the built-in `json` decoder (JSON_Decoder) grabs it first - a custom parent decoder with a prematch
+     would never run. That is why these are children of the `json` decoder (a regex over the whole line extracts IP and account);
+     the rules rely on decoded_as json + match. -->
+<!-- For the `json` parent only the FIRST matching child works - further children (admin, generic) were skipped, so there is a single
+     decoder with an alternation in a branch-reset group (?|...|...): shared fields extra_data, srcip, dstuser. -->
+<decoder name="vaultwarden-login">
+  <parent>json</parent>
+  <regex type="pcre2">\[vaultwarden::[\w:]+\]\[ERROR\] (?|(Username or password is incorrect)\. Try again\. IP: ([0-9a-fA-F:.]+)\. Username: (.+?)\.\\n"|(.+?)\.? IP: ([0-9a-fA-F:.]+)())</regex>
+  <order>extra_data, srcip, dstuser</order>
+</decoder>
+<!-- /vaultwarden-decoders -->

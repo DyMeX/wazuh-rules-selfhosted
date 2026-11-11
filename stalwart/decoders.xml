@@ -1,0 +1,16 @@
+<!-- stalwart-decoders -->
+<!-- Decoders for Stalwart (file log with ANSI colours). Appended to /var/ossec/etc/decoders/local_decoder.xml by deploy.sh
+     (the block between the markers is replaced on every run). Rollback: remove the block and restart the manager. -->
+
+<!-- Stalwart: /var/log/stalwart/stalwart.<date>, INFO level, the file contains ANSI colours (\x1b[..m), also around field names:
+     ESC[37m2026-10-23T02:31:21ZESC[0m ESC[32;1mINFOESC[0m ESC[37;1mBanned due to scanESC[0m (security.scan-ban) ESC[36mlistenerIdESC[0m = "submissions", ESC[36mremoteIpESC[0m = 203.0.113.50, ... -->
+<decoder name="stalwart">
+  <prematch type="pcre2">^(?:\x1b\[[0-9;]*m)*\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ(?:\x1b\[[0-9;]*m)* (?:\x1b\[[0-9;]*m)*(?:TRACE|DEBUG|INFO|WARN|ERROR)</prematch>
+</decoder>
+
+<decoder name="stalwart-security">
+  <parent>stalwart</parent>
+  <regex type="pcre2">\((security\.[\w-]+)\).*?remoteIp(?:\x1b\[[0-9;]*m)* = ([0-9a-fA-F:.]+)</regex>
+  <order>id, srcip</order>
+</decoder>
+<!-- /stalwart-decoders -->

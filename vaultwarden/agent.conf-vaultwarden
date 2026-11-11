@@ -1,6 +1,6 @@
 <agent_config>
   <!-- Group "vaultwarden" (agent on the Vaultwarden host): container log (Docker json-file, no Vaultwarden restart needed)
-       + FIM of configuration and key. Decoder vaultwarden*, rules 100150-100155, 100184. File: /var/ossec/etc/shared/vaultwarden/agent.conf -->
+       + FIM of configuration and key. Decoder vaultwarden*, rules 100150-100155 (the alert rule 100184 for the FIM part is in ../fim). File: /var/ossec/etc/shared/vaultwarden/agent.conf -->
   <localfile>
     <log_format>syslog</log_format>
     <location>/var/lib/docker/containers/*/*-json.log</location>
