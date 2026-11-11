@@ -1,0 +1,107 @@
+<!-- general-rules -->
+<!-- General rules: quieter series of web 4xx, SSH logins from outside trusted networks, change of listening ports, night OOM noise.
+     Appended to /var/ossec/etc/rules/local_rules.xml by deploy.sh (the block is replaced on re-run, marker general-rules).
+     Rollback: remove the block and restart the manager. -->
+
+<!-- 31151 "Multiple web server 400 error codes from same source ip": in my setup 714 level 10 alerts in 5 days, almost all from the public
+     server (scanners hitting 404/403 that CrowdSec bans and Cloudflare blocks anyway). They hid real level 10 alerts. Lowered to 6.
+     Series of 401 (password guessing against pages with HTTP authentication) have their own rule 100201 (level 10).
+     The rest of the definition is unchanged. -->
+<group name="web,accesslog,">
+  <rule id="31151" level="6" frequency="14" timeframe="90" overwrite="yes">
+    <if_matched_sid>31101</if_matched_sid>
+    <same_source_ip />
+    <description>Multiple web server 400 error codes from same source ip (lowered to 6 - scanners).</description>
+    <mitre>
+      <id>T1595.002</id>
+    </mitre>
+    <group>web_scan,recon,pci_dss_6.5,pci_dss_11.4,gdpr_IV_35.7.d,nist_800_53_SA.11,nist_800_53_SI.4,tsc_CC6.6,tsc_CC7.1,tsc_CC8.1,tsc_CC6.1,tsc_CC6.8,tsc_CC7.2,tsc_CC7.3,</group>
+  </rule>
+</group>
+
+<group name="local,web,authentication_failures,">
+  <rule id="100200" level="5">
+    <if_sid>31101</if_sid>
+    <id>^401$</id>
+    <description>Web: authentication refused (401) for $(srcip) - $(url)</description>
+    <group>authentication_failed,</group>
+  </rule>
+  <rule id="100201" level="10" frequency="8" timeframe="300">
+    <if_matched_sid>100200</if_matched_sid>
+    <same_source_ip />
+    <description>Web: 8 or more authentication refusals (401) from $(srcip) in 5 min - password guessing against a page with a login</description>
+    <group>authentication_failures,</group>
+    <mitre><id>T1110</id></mitre>
+  </rule>
+</group>
+
+<!-- SSH: successful login (5715) from an address that is in neither etc/lists/trusted-ssh nor etc/lists/trusted-ssh-home.
+     The home address of a residential line changes every few days, so the home list maintains itself: rule 100210 (level 5, no e-mail)
+     runs the integration custom-ssh-home, which compares the login address with the current public address of home.
+     Same /24: the prefix goes to etc/lists/trusted-ssh-home and a line is logged -> 100212 (level 3).
+     Any other address, or a failed check: a line is logged -> 100211 (level 12: e-mail and escalation).
+     trusted-ssh = fixed addresses from this repository, trusted-ssh-home = written only by the integration on the manager. -->
+<group name="local,sshd,authentication_success,">
+  <rule id="100210" level="5">
+    <if_sid>5715</if_sid>
+    <list field="srcip" lookup="not_address_match_key">etc/lists/trusted-ssh</list>
+    <list field="srcip" lookup="not_address_match_key">etc/lists/trusted-ssh-home</list>
+    <description>SSH: successful login $(dstuser) from an address outside the trusted lists: $(srcip) - checking whether it is the new home address (custom-ssh-home)</description>
+    <mitre><id>T1078</id></mitre>
+  </rule>
+  <rule id="100211" level="12">
+    <decoded_as>ssh-home</decoded_as>
+    <field name="ssh_home">^foreign$</field>
+    <description>SSH: successful login $(dstuser) on $(target) from an address outside LAN/Tailscale/home: $(srcip) - stolen key or the owner away from home without Tailscale ($(reason))</description>
+    <mitre><id>T1078</id></mitre>
+  </rule>
+  <rule id="100212" level="3">
+    <decoded_as>ssh-home</decoded_as>
+    <field name="ssh_home">^home$</field>
+    <description>SSH: new public home address $(prefix) added to the trusted list (login $(dstuser) from $(srcip) on $(target))</description>
+  </rule>
+</group>
+
+<!-- Listening ports: a command from the agents' local ossec.conf (ports-agents.sh) - ss, TCP only, without loopback and without the
+     random Tailscale port; check_diff = alert on every change of the set. Alias "public-ports" = the public server (level 12),
+     the others level 10. -->
+<group name="local,ossec,ports,">
+  <rule id="100221" level="12">
+    <if_sid>530</if_sid>
+    <match>ossec: output: 'public-ports'</match>
+    <check_diff />
+    <description>Public server: change of listening ports (new or closed port on an internet-facing host)</description>
+    <mitre><id>T1571</id></mitre>
+  </rule>
+  <rule id="100220" level="10">
+    <if_sid>530</if_sid>
+    <match>ossec: output: 'listening-ports'</match>
+    <check_diff />
+    <description>Change of listening ports (new or closed TCP port)</description>
+    <mitre><id>T1571</id></mitre>
+  </rule>
+</group>
+
+<!-- 5108 "System running out of memory" (level 12) during night maintenance: in my setup a backup from 01:00 and updates 04:25-06:40
+     run on hosts that were OOM-killed while the backup disk was stalled. The monitoring system (Zabbix) has maintenance windows
+     for that work, Wazuh did not. The manager runs in UTC: 22:55-05:40 UTC. Level 8 stays on the dashboard and does not escalate;
+     if something still does not work after the OOM, the monitoring system reports it after the maintenance window. -->
+<group name="local,syslog,">
+  <rule id="100225" level="8">
+    <if_sid>5108</if_sid>
+    <time>22:55 - 05:40</time>
+    <description>Out of memory (OOM) during night maintenance (backup/updates) - lowered from 12, effects are reported by the monitoring system after the maintenance window</description>
+  </rule>
+</group>
+
+<!-- Zabbix web interface: refresh POSTs of a dashboard viewed from one fixed host are not a bot (86 alerts of 31533 per week in my setup).
+     Replace srcip with the address your dashboard is viewed from (192.0.2.11 is an example). -->
+<group name="local,zabbix,">
+  <rule id="100230" level="0">
+    <if_sid>31533</if_sid>
+    <srcip>192.0.2.11</srcip>
+    <url type="pcre2">^/(?:zabbix\.php\?action=(?:widget\.|notifications\.get|dashboard\.)|jsrpc\.php\?output=json-rpc)</url>
+    <description>Zabbix: dashboard refresh POSTs from the monitoring viewer host - silenced (31533 noise)</description>
+  </rule>
+</group>
+<!-- /general-rules -->

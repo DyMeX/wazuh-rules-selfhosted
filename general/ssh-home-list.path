@@ -1,0 +1,9 @@
+# Change of the home address list (custom-ssh-home) -> reload of the Wazuh manager. Installed by deploy.sh
+[Unit]
+Description=Wazuh: trusted-ssh-home list changed
+
+[Path]
+PathChanged=/var/ossec/etc/lists/trusted-ssh-home
+
+[Install]
+WantedBy=multi-user.target

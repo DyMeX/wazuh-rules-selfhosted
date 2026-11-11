@@ -1,0 +1,11 @@
+<!-- general-decoders -->
+<!-- Lines written by the custom-ssh-home integration to /var/ossec/logs/ssh-home.log (rules 100211/100212). Appended to
+     /var/ossec/etc/decoders/local_decoder.xml by deploy.sh (marker: general-decoders). Rollback: remove the block and restart the manager.
+     Example line (one line in the log):
+     ssh-home: foreign srcip=203.0.113.9 user=root target=web1 prefix=- home=198.51.100.1 reason=address outside the /24 of the current home address entry=Nov 11 ... Accepted publickey ... -->
+<decoder name="ssh-home">
+  <prematch>^ssh-home: </prematch>
+  <regex offset="after_prematch">^(\S+) srcip=(\S+) user=(\S+) target=(\S+) prefix=(\S+) home=(\S+) reason=(\.+) entry=</regex>
+  <order>ssh_home, srcip, dstuser, target, prefix, home, reason</order>
+</decoder>
+<!-- /general-decoders -->

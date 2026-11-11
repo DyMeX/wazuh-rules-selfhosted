@@ -1,0 +1,10 @@
+# Restart of the manager after a new home address was added to etc/lists/trusted-ssh-home (CDB lists are loaded only when analysisd starts).
+[Unit]
+Description=Wazuh: restart manager after trusted-ssh-home changed
+StartLimitIntervalSec=3600
+StartLimitBurst=6
+
+[Service]
+Type=oneshot
+ExecStartPre=/var/ossec/bin/wazuh-analysisd -t
+ExecStart=/usr/bin/systemctl restart wazuh-manager
